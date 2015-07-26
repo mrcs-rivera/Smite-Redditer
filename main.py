@@ -30,7 +30,7 @@ def main():
 
         if choice == "populate" or choice == "update":
             web_scrapper()
-        elif choice == "one":
+        elif choice == "one" and not empty:
             god_choice = raw_input("Which god do you want? ")
             print god_choice
             god = god_coll.find_one({"god": god_choice.title()})
@@ -39,7 +39,7 @@ def main():
             else:
                 create_reddit_post(god_choice.title())
                 print "\nText File Created!\n"
-        elif choice == "all":
+        elif choice == "all" and not empty:
             gods = god_coll.find()
             for god in gods:
                 create_reddit_post(god["god"])

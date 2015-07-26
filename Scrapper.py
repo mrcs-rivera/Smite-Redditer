@@ -21,24 +21,7 @@ def web_scrapper():
     print "Please wait, this could take several minutes."
 
     # Grab up to date list of Smite gods
-    loaded = False
-    while not loaded:
-        try:
-            driver.get("http://www.smitegame.com/gods/")
-        except TimeoutException:
-            time.sleep(5)
-        except socket_error:
-            driver = webdriver.Chrome(executable_path=chromedriver)
-            driver.set_page_load_timeout(30)
-        except:
-            try:
-                driver.quit()
-            except:
-                pass
-            driver = webdriver.Chrome(executable_path=chromedriver)
-            driver.set_page_load_timeout(30)
-        else:
-            loaded = True
+    driver = load_url(driver, chromedriver, "http://www.smitegame.com/gods/")
     gods = driver.find_elements_by_xpath("//a[@class='icon-container']")
     god_names = []
     for god in gods:
@@ -50,28 +33,14 @@ def web_scrapper():
     for god in god_names:
         cached = god_coll.find_one({'god': god})
         if cached and ((datetime.now()) - cached['lastupdated']) < timedelta(days=1):
+            # Update progress bar
             b += 1
             pbar.update(b)
         else:
             # Get god abilities from official website
-            loaded = False
-            while not loaded:
-                try:
-                    driver.get("http://www.smitegame.com/gods/" + god.replace(' ', '-'))
-                except TimeoutException:
-                    time.sleep(5)
-                except socket_error:
-                    driver = webdriver.Chrome(executable_path=chromedriver)
-                    driver.set_page_load_timeout(30)
-                except:
-                    try:
-                        driver.quit()
-                    except:
-                        pass
-                    driver = webdriver.Chrome(executable_path=chromedriver)
-                    driver.set_page_load_timeout(30)
-                else:
-                    loaded = True
+            driver = load_url(driver, chromedriver, "http://www.smitegame.com/gods/" + god.replace(' ', '-'))
+            
+            # Scrap and parse god abilities
             tmp = driver.find_elements_by_xpath("//div[@class='single-ability']")
             info = []
             for t in tmp:
@@ -85,73 +54,34 @@ def web_scrapper():
             abilities = [abil1, abil2, abil3, abil4]
             i = 0
             for inf in info:
-                t = inf.find_elements_by_xpath(".//div")
-                if "(Passive)" in t[2].text:
-                    passive['name'] = t[2].text.encode('utf-8')[:-10]
-                    passive['description'] = t[3].text.encode('utf-8')
+                texts = inf.find_elements_by_xpath(".//div")
+                if "(Passive)" in texts[2].text:
+                    passive['name'] = texts[2].text.encode('utf-8')[:-10]
+                    passive['description'] = texts[3].text.encode('utf-8')
                 else:
-                    abilities[i]['name'] = t[2].text.encode('utf-8')
-                    abilities[i]['description'] = t[3].text.encode('utf-8')
-                    for j in range(4, len(t)):
-                        if 'Cost' in t[j].text:
-                            abilities[i]['cost'] = t[j].text.encode('utf-8')[6:]
-                        elif 'Cooldown' in t[j].text:
-                            abilities[i]['cooldown'] = t[j].text.encode('utf-8')[10:]
+                    abilities[i]['name'] = texts[2].text.encode('utf-8')
+                    abilities[i]['description'] = texts[3].text.encode('utf-8')
+                    for j in range(4, len(texts)):
+                        if 'Cost' in texts[j].text:
+                            abilities[i]['cost'] = texts[j].text.encode('utf-8')[6:]
+                        elif 'Cooldown' in texts[j].text:
+                            abilities[i]['cooldown'] = texts[j].text.encode('utf-8')[10:]
                     i += 1
 
             # Get god Lore and stats from third party smite wiki
-            loaded = False
-            while not loaded:
-                try:
-                    driver.get("http://smite.gamepedia.com/" + god.replace(' ', '_'))
-                except TimeoutException:
-                    time.sleep(5)
-                except socket_error:
-                    driver = webdriver.Chrome(executable_path=chromedriver)
-                    driver.set_page_load_timeout(30)
-                except:
-                    try:
-                        driver.quit()
-                    except:
-                        pass
-                    driver = webdriver.Chrome(executable_path=chromedriver)
-                    driver.set_page_load_timeout(30)
-                else:
-                    loaded = True
-
-            scraped = False
-            while not scraped:
-                try:
-                    tmp = driver.find_elements_by_xpath("//p")
-                    info = []
-                    for t in tmp:
-                        if t.text != '':
-                            info.append(t.text.encode('utf-8'))
-                except TimeoutException:
-                    scraped = False
-                else:
-                    scraped = True
-
+            driver = load_url(driver, chromedriver, "http://smite.gamepedia.com/" + god.replace(' ', '_'))
+            
+            # Scrap and parse god lore 
+            info = scrap_info(driver, "//p", 99999)
             lore = ""
             for i in info[:-15]:
                 if len(i) > 120:
                     lore = lore + i + '\n'
                 if 'Ability Video' in i:
                     break
-
-            scraped = False
-            while not scraped:
-                try:
-                    tmp = driver.find_elements_by_xpath("//tr")
-                    info = []
-                    for t in tmp:
-                        if t.text != '' and len(t.text) < 1500:
-                            info.append(t.text.encode('utf-8'))
-                except TimeoutException:
-                    scraped = False
-                else:
-                    scraped = True
-
+            
+            # Scrap and parse god stats
+            info = scrap_info(driver, "//tr", 1500)
             stats = {}
             for i in range(0, len(info)):
                 if 'Title:' in info[i] and 'title' not in stats:
@@ -195,8 +125,11 @@ def web_scrapper():
                  'abil3': abil3,
                  'abil4': abil4},
                  'lastupdated': datetime.now()}
-            # Store mongo document
+            
+            # Store/Update mongo document
             god_coll.update({'god': doc['god']}, doc, True)
+            
+            # Update progress bar
             b += 1
             pbar.update(b)
     try:
@@ -205,3 +138,42 @@ def web_scrapper():
         pass
     Xvfb().stop()
     print "\nDone!\n"
+
+
+def load_url(driver, chromedriver, url):
+    loaded = False
+    while not loaded:
+        try:
+            driver.get(url)
+        except TimeoutException:
+            time.sleep(5)
+        except socket_error:
+            driver = webdriver.Chrome(executable_path=chromedriver)
+            driver.set_page_load_timeout(30)
+        except:
+            try:
+                driver.quit()
+            except:
+                pass
+            driver = webdriver.Chrome(executable_path=chromedriver)
+            driver.set_page_load_timeout(30)
+        else:
+            loaded = True
+    return driver
+
+
+def scrap_info(driver, xpath, len_delim):
+    scrapped = False
+    info = []
+    while not scrapped:
+        try:
+            tmp = driver.find_elements_by_xpath(xpath)
+            for t in tmp:
+                if t.text != '' and len(t.text) < len_delim:
+                    info.append(t.text.encode('utf-8'))
+        except TimeoutException:
+            scrapped = False
+        else:
+            scrapped = True
+    return info
+
